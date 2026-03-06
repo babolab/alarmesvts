@@ -314,8 +314,12 @@ with col_logo:
     if os.path.exists("logo.png"):
         st.image("logo.png", width=120)
 with col_title:
-    st.title("⚓ Service navigation du CROSS Jobourg - Rapport d'alarmes de collision")
-    st.markdown("Importez un fichier CSV d'alarmes pour générer un rapport filtré.")
+    st.markdown("""
+        <h1 style='margin-bottom:0'>⚓ Rapport d'alarmes de collision</h1>
+        <h3 style='color:#1a3a5c; margin-top:4px'>Service Navigation du CROSS Jobourg</h3>
+        <p style='color:#888'>Importez un fichier CSV d'alarmes pour générer un rapport filtré.</p>
+    """, unsafe_allow_html=True)
+
 
 
 uploaded_file = st.file_uploader("📂 Importer un fichier CSV d'alarmes extraites de SIG VTS (à récupérer dans Service NAVIGATION - 01 - Statistiques - 1.1 - Statistiques - 2026 - Acquitement des alarmes )", type=["csv"])
