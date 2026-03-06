@@ -306,7 +306,7 @@ def build_pdf_fpdf(ships_data, date_start, date_end):
 # APPLICATION STREAMLIT
 # ─────────────────────────────────────────────
 
-st.set_page_config(page_title="Alarmes Collision", page_icon="⚓", layout="wide")
+st.set_page_config(page_title="CROSS Jobourg - Alarmes Collision", page_icon="⚓", layout="wide")
 
 # Logo et titre
 col_logo, col_title = st.columns([1, 5])
@@ -314,7 +314,7 @@ with col_logo:
     if os.path.exists("logo.png"):
         st.image("logo.png", width=120)
 with col_title:
-    st.title("⚓ Rapport d'alarmes de collision")
+    st.title("⚓ Service navigation du CROSS Jobourg - Rapport d'alarmes de collision")
     st.markdown("Importez un fichier CSV d'alarmes pour générer un rapport filtré.")
 
 
