@@ -318,7 +318,7 @@ with col_title:
     st.markdown("Importez un fichier CSV d'alarmes pour générer un rapport filtré.")
 
 
-uploaded_file = st.file_uploader("📂 Importer un fichier CSV d'alarmes", type=["csv"])
+uploaded_file = st.file_uploader("📂 Importer un fichier CSV d'alarmes extraites de SIG VTS (à récupérer dans Service NAVIGATION - 01 - Statistiques - 1.1 - Statistiques - 2026 - Acquitement des alarmes )", type=["csv"])
 
 if uploaded_file:
     with st.spinner("Chargement et traitement des données..."):
