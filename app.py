@@ -361,7 +361,7 @@ if uploaded_file:
         date_end = st.date_input("Date de fin", value=date_max, min_value=date_min, max_value=date_max)
 
     if not selected_ships:
-        st.info("👆 Sélectionnez au moins un navire pour générer le rapport.")
+        st.info("👆 Sélectionnez au moins un navire pour générer le rapport. Attendre 15 secondes au premier chargement si nécessaire.")
         st.stop()
 
     if date_start > date_end:
