@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import re
+import os
 from datetime import datetime, timedelta
 from fpdf import FPDF
 
@@ -30,8 +31,10 @@ def parse_wkt_to_dms(wkt):
 def load_and_clean(file):
     df = pd.read_csv(file, dtype=str)
     df.columns = df.columns.str.strip()
-    df["ship_name"] = df["ship_name"].str.strip()
-    df["target_1_ship_name"] = df["target_1_ship_name"].str.strip()
+    df["ship_name"] = df["ship_name"].fillna("").str.strip()
+    df["target_1_ship_name"] = df["target_1_ship_name"].fillna("").str.strip()
+    # Exclure les lignes sans nom de navire
+    df = df[(df["ship_name"] != "") & (df["target_1_ship_name"] != "")].copy()
     # Filtrer COLLISION uniquement
     df = df[df["event_type"].str.upper() == "COLLISION"].copy()
     # Convertir dates
@@ -41,25 +44,20 @@ def load_and_clean(file):
     df["dcpam"] = pd.to_numeric(df["dcpam"], errors="coerce")
     df["tcpamsec"] = pd.to_numeric(df["tcpamsec"], errors="coerce")
     df = df.dropna(subset=["dcpam", "tcpamsec"])
-    # Convertir TCPA en minutes et filtrer
-    df["tcpa_min"] = df["tcpamsec"] / 60.0
+    # Convertir TCPA en minutes (source en millisecondes) et filtrer
+    df["tcpa_min"] = df["tcpamsec"] / 1000.0 / 60.0
     df = df[(df["tcpa_min"] >= 0) & (df["tcpa_min"] <= 7)].copy()
     # Position DMS
     df["position_dms"] = df["event_pos_wkt"].apply(parse_wkt_to_dms)
     # Couple non ordonné
     df["couple_key"] = df.apply(
-        lambda r: tuple(sorted([r["ship_name"], r["target_1_ship_name"]])), axis=1
+        lambda r: "||".join(sorted([str(r["ship_name"]), str(r["target_1_ship_name"])])), axis=1
     )
     df["ack_comment"] = df["ack_comment"].fillna("").str.strip()
     return df
 
 def group_alarms(df):
-    """
-    Regrouper par couple non ordonné : dans un groupe de lignes
-    où chaque ligne est à moins de 15 min des autres,
-    garder le CPA minimum, concaténer les commentaires distincts.
-    """
-    df = df.sort_values("event_dt_local").copy()
+    df = df.sort_values("event_dt_local").copy().reset_index(drop=True)
     results = []
 
     for couple_key, group in df.groupby("couple_key"):
@@ -75,23 +73,18 @@ def group_alarms(df):
                 if used[j]:
                     continue
                 t_j = group.loc[j, "event_dt_local"]
-                # Chaque ligne doit être à moins de 15 min de la ligne de référence (première du cluster)
                 if abs((t_j - ref_time).total_seconds()) < 15 * 60:
                     cluster.append(j)
-                else:
-                    break  # trié chronologiquement, inutile de continuer
+                # Pas de break ici
 
-            cluster_df = group.loc[cluster]
-            # Ligne avec CPA minimum
-            best_idx = cluster_df["dcpam"].idxmin()
-            best = cluster_df.loc[best_idx].copy()
+            cluster_df = group.loc[cluster].copy()
+            
+            # ← FIX : utiliser idxmin() sur le sous-df réindexé
+            best_local_idx = cluster_df["dcpam"].idxmin()
+            best = cluster_df.loc[best_local_idx].copy()
 
-            # Concaténer les commentaires distincts et non vides
             comments = [c for c in cluster_df["ack_comment"].tolist() if c]
-            unique_comments = []
-            for c in comments:
-                if c not in unique_comments:
-                    unique_comments.append(c)
+            unique_comments = list(dict.fromkeys(comments))  # dédoublonnage ordre préservé
             best["comment_final"] = " | ".join(unique_comments) if unique_comments else "-"
 
             results.append(best)
@@ -101,8 +94,8 @@ def group_alarms(df):
     if not results:
         return pd.DataFrame()
 
-    result_df = pd.DataFrame(results)
-    return result_df.sort_values("event_dt_local").reset_index(drop=True)
+    return pd.DataFrame(results).sort_values("event_dt_local").reset_index(drop=True)
+
 
 def filter_for_ship(df_grouped, ship, date_start, date_end):
     mask = (
@@ -201,22 +194,33 @@ def build_export_df(ships_data):
         return pd.concat(frames, ignore_index=True)
     return pd.DataFrame()
 
-def build_pdf_fpdf(ships_data, date_start, date_end):
-    from fpdf.enums import XPos, YPos  # ajouter cet import en haut de la fonction
 
-    pdf = FPDF()
+
+def build_pdf_fpdf(ships_data, date_start, date_end):
+    from fpdf.enums import XPos, YPos
+    import os
+
+    pdf = FPDF(orientation='L')  # ← Mode paysage (Landscape)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+    
+    # Logo en haut à droite (ajusté pour paysage)
+    if os.path.exists("logo.png"):
+        pdf.image("logo.png", x=260, y=10, w=20)
+    
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, "Rapport d'alarmes de collision",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, f"Periode : {date_start} -> {date_end}",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 5, "Alarmes groupees par couple de navires et par intervalle de 15 minutes.",
+             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(4)
 
     cols = ["Navire", "Cible", "CPA(m)", "TCPA(min)", "Date", "Heure", "Position", "Commentaire"]
-    widths = [28, 28, 14, 16, 20, 16, 44, 24]
+    widths = [35, 35, 18, 18, 22, 18, 50, 60]  # Position réduite à 50, Commentaire augmentée à 60
 
     for ship, df_ship in ships_data.items():
         pdf.set_font("Helvetica", "B", 11)
@@ -241,6 +245,36 @@ def build_pdf_fpdf(ships_data, date_start, date_end):
         pdf.ln()
 
         # Lignes
+        # Lignes (VERSION SIMPLE)
+        pdf.set_font("Helvetica", "", 7)
+        for _, row in df_ship.iterrows():
+            cpa = int(row["dcpam"])
+            if cpa < 150:
+                pdf.set_text_color(200, 0, 0)
+            else:
+                pdf.set_text_color(0, 0, 0)
+    
+            vals = [
+                str(row["ship_name"])[:25],
+                str(row["target_1_ship_name"])[:25],
+                str(cpa),
+                str(round(row["tcpa_min"], 2)),
+                row["event_dt_local"].strftime("%d/%m/%Y"),
+                row["event_dt_local"].strftime("%H:%M:%S"),
+                str(row["position_dms"])[:35],
+                str(row["comment_final"])[:85]  # Limite étendue à 85 caractères
+            ]
+    
+            for val, w in zip(vals, widths):
+                pdf.cell(w, 5, val, border=1)
+            pdf.ln()
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+      
+
+
+
         pdf.set_font("Helvetica", "", 7)
         for _, row in df_ship.iterrows():
             cpa = int(row["dcpam"])
@@ -273,8 +307,16 @@ def build_pdf_fpdf(ships_data, date_start, date_end):
 # ─────────────────────────────────────────────
 
 st.set_page_config(page_title="Alarmes Collision", page_icon="⚓", layout="wide")
-st.title("⚓ Rapport d'alarmes de collision")
-st.markdown("Importez un fichier CSV d'alarmes pour générer un rapport filtré.")
+
+# Logo et titre
+col_logo, col_title = st.columns([1, 5])
+with col_logo:
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=120)
+with col_title:
+    st.title("⚓ Rapport d'alarmes de collision")
+    st.markdown("Importez un fichier CSV d'alarmes pour générer un rapport filtré.")
+
 
 uploaded_file = st.file_uploader("📂 Importer un fichier CSV d'alarmes", type=["csv"])
 
